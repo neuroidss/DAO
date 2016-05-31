@@ -70,7 +70,7 @@ contract TokenCreationInterface {
 
     /// @return The divisor used to calculate the token creation rate during
     /// the creation phase
-    function divisor() returns (uint divisor);
+    function divisor() constant returns (uint divisor);
 
     event FuelingToDate(uint value);
     event CreatedToken(address indexed to, uint amount);
@@ -112,7 +112,8 @@ contract TokenCreation is TokenCreationInterface, Token {
     function refund() noEther {
         if (now > closingTime && !isFueled) {
             // Get extraBalance - will only succeed when called for the first time
-            extraBalance.payOut(address(this), extraBalance.accumulatedInput());
+            if (extraBalance.balance >= extraBalance.accumulatedInput())
+                extraBalance.payOut(address(this), extraBalance.accumulatedInput());
 
             // Execute refund
             if (msg.sender.call.value(weiGiven[msg.sender])()) {
@@ -124,7 +125,7 @@ contract TokenCreation is TokenCreationInterface, Token {
         }
     }
 
-    function divisor() returns (uint divisor) {
+    function divisor() constant returns (uint divisor) {
         // The number of (base unit) tokens per wei is calculated
         // as `msg.value` * 20 / `divisor`
         // The fueling period starts with a 1:1 ratio

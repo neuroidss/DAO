@@ -20,6 +20,7 @@ tests/fund_fail2.js
 tests/fuel.js
 tests/fuel_fail.js
 tests/fuel_fail2.js
+tests/fuel_fail_extrabalance.js
 tests/proposal.js
 tests/accounts.js
 tests/rewards.js
@@ -32,6 +33,13 @@ tests/multisplitrewards.js
 tests/spendall.js
 tests/extrabalance.js
 tests/stealextrabalance.js
+tests/firecontractor.js
+tests/sampleoffer_dailypayment.js
+tests/sampleoffer_daopayownrewards.js
+tests/sampleoffer_setrewardvars.js
+tests/sampleoffer_changeclient.js
+tests/sampleoffer_gettersvt.js
+tests/curator_halveminquorum_fueling.js
 
 # Ignore deployment related file
 deploy/code.js

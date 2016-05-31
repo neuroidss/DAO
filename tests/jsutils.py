@@ -9,6 +9,7 @@ def js_common_intro(accounts_num):
     s += """// set the basic accounts, coinbase should be random so mining rewards don't pollute results
 var curator = eth.accounts[0];
 var proposalCreator = eth.accounts[1];
+var contractor = eth.accounts[2];
 var etherBase = '0x9999999999999999999999999999999999999999';
 web3.miner.setEtherbase(etherBase);
 
@@ -17,7 +18,7 @@ var testMap = {};
 function checkWork() {
     miner.start(1);
     admin.sleepBlocks(3);
-    miner.stop(0);
+    miner.stop();
 }
 
 function time_now() {
@@ -113,7 +114,7 @@ function attempt_split(argdao, prop_id, user, new_curator, split_exec_period) {
     argdao.splitDAO.sendTransaction(
         prop_id,
         new_curator,
-        {from:user, gas: 4000000});
+        {from:user, gas: 4700000});
     checkWork();
     console.log("Account '" + user + "' called splitDAO() succesfully");
 }
@@ -130,27 +131,32 @@ function attempt_execute_proposal(
     console.log("Attempting to execute proposal for: '" +desc +"'.");
 
     if (vote_deadline.gt(time_now())) {
-        testFail("Can't execute a proposal whilte it is is still debated.");
+        testFail("Can't execute a proposal while it is is still debated.");
     }
 
     argdao.executeProposal.sendTransaction(
         prop_id,
         bytecode,
-        {from: prop_creator, gas:4000000}
+        {from: prop_creator, gas:4700000}
     );
     checkWork();
+    var should_quit = false;
     if (argdao.proposals(prop_id)[4] == expect_closed) {
-        testFail(
-            "Failed to execute proposal for: '" +desc +"'. Expected the " +
-            "proposal to be " + (expect_closed ? "closed" : "open") +
+        should_quit = true;
+        console.log(
+            "Expected the proposal to be " + (expect_closed ? "closed" : "open") +
             " but it's not"
         );
     }
     if (argdao.proposals(prop_id)[5] != expect_pass) {
-        testFail(
+        should_quit = true;
+        console.log(
             "Expected the proposal for: '" +desc +" to " +
             (expect_pass ? "pass" : "fail") + "."
         );
+    }
+    if (should_quit) {
+        testFail("Failed to execute proposal for: '" +desc +"'.");
     }
     console.log("Executed proposal: '" + desc + "'.");
 }

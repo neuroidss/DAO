@@ -49,18 +49,18 @@ checkWork();
 
 
 setTimeout(function() {
-    miner.stop(0);
+    miner.stop();
     console.log("Attack debate period over.");
 
     setTimeout(function() {
-        miner.stop(0);
+        miner.stop();
 
         console.log("Split debate period over. Executing the split proposal...");
         // now the attacker splits
         dao.splitDAO.sendTransaction(
             split_proposal_id,
             attacker,
-            {from:attacker, gas: 4000000}
+            {from:attacker, gas: 4700000}
         );
         checkWork();
 

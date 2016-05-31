@@ -14,7 +14,9 @@ def run(ctx):
 
     accounts_num = len(ctx.accounts)
     creation_secs = ctx.remaining_time()
-    ctx.total_supply = random.randint(5, ctx.args.deploy_min_value - 4)
+    ctx.total_supply = random.randint(
+        5, ctx.args.deploy_min_tokens_to_create - 4
+    )
     ctx.token_amounts = constrained_sum_sample_pos(
         accounts_num, ctx.total_supply
     )

@@ -36,7 +36,7 @@ contract DAOInterface {
     // Period of days inside which it's possible to execute a DAO split
     uint constant splitExecutionPeriod = 27 days;
     // Period of time after which the minimum Quorum is halved
-    uint constant quorumHalvingPeriod = 52 weeks;
+    uint constant quorumHalvingPeriod = 25 weeks;
     // Period after which a proposal is closed
     // (used in the case `executeProposal` fails because it throws)
     uint constant executeProposalPeriod = 10 days;
@@ -50,7 +50,7 @@ contract DAOInterface {
     // totalSupply / minQuorumDivisor
     uint public minQuorumDivisor;
     // The unix time of the last time quorum was reached on a proposal
-    uint  public lastTimeMinQuorumMet;
+    uint public lastTimeMinQuorumMet;
 
     // Address of the curator
     address public curator;
@@ -275,7 +275,7 @@ contract DAOInterface {
     function changeProposalDeposit(uint _proposalDeposit) external;
 
     /// @notice Move rewards from the DAORewards managed account
-    /// @param _toMembers If true rewards are move to the actual reward account
+    /// @param _toMembers If true rewards are moved to the actual reward account
     ///                   for the DAO. If not then it's moved to the DAO itself
     /// @return Whether the call was successful
     function retrieveDAOReward(bool _toMembers) external returns (bool _success);
@@ -318,13 +318,16 @@ contract DAOInterface {
 
     /// @param _proposalID Id of the new curator proposal
     /// @return Address of the new DAO
-    function getNewDAOAdress(uint _proposalID) constant returns (address _newDAO);
-
+    function getNewDAOAddress(uint _proposalID) constant returns (address _newDAO);
 
     /// @param _account The address of the account which is checked.
     /// @return Whether the account is blocked (not allowed to transfer tokens) or not.
-    function isBlocked(address _account) returns (bool);
+    function isBlocked(address _account) internal returns (bool);
 
+    /// @notice If the caller is blocked by a proposal whose voting deadline
+    /// has exprired then unblock him.
+    /// @return Whether the account is blocked (not allowed to transfer tokens) or not.
+    function unblockMe() returns (bool);
 
     event ProposalAdded(
         uint indexed proposalID,
@@ -375,7 +378,7 @@ contract DAO is DAOInterface, Token, TokenCreation {
     }
 
     function () returns (bool success) {
-        if (now < closingTime + creationGracePeriod)
+        if (now < closingTime + creationGracePeriod && msg.sender != address(extraBalance))
             return createTokenProxy(msg.sender);
         else
             return receiveEther();
@@ -427,6 +430,10 @@ contract DAO is DAOInterface, Token, TokenCreation {
         // to prevent a 51% attacker to convert the ether into deposit
         if (msg.sender == address(this))
             throw;
+
+        // to prevent curator from halving quorum before first proposal
+        if (proposals.length == 1) // initial length is 1 (see constructor)
+            lastTimeMinQuorumMet = now;
 
         _proposalID = proposals.length++;
         Proposal p = proposals[_proposalID];
@@ -527,7 +534,7 @@ contract DAO is DAOInterface, Token, TokenCreation {
 
         // If the curator removed the recipient from the whitelist, close the proposal
         // in order to free the deposit and allow unblocking of voters
-        if (!isRecipientAllowed(p.recipient) && p.open) {
+        if (!isRecipientAllowed(p.recipient)) {
             closeProposal(_proposalID);
             p.creator.send(p.proposalDeposit);
             return;
@@ -549,24 +556,34 @@ contract DAO is DAOInterface, Token, TokenCreation {
                 proposalCheck = false;
         }
 
-        // Execute result
-        if (quorum >= minQuorum(p.amount) && p.yea > p.nay && proposalCheck) {
+        if (quorum >= minQuorum(p.amount)) {
             if (!p.creator.send(p.proposalDeposit))
                 throw;
 
             lastTimeMinQuorumMet = now;
+            // set the minQuorum to 20% again, in the case it has been reached
+            if (quorum > totalSupply / 5)
+                minQuorumDivisor = 5;
+        }
 
+        // Execute result
+        if (quorum >= minQuorum(p.amount) && p.yea > p.nay && proposalCheck) {
             if (!p.recipient.call.value(p.amount)(_transactionData))
                 throw;
 
             p.proposalPassed = true;
             _success = true;
-            rewardToken[address(this)] += p.amount;
-            totalRewardToken += p.amount;
-        } else if (quorum >= minQuorum(p.amount) && p.nay >= p.yea || !proposalCheck) {
-            if (!p.creator.send(p.proposalDeposit))
-                throw;
-            lastTimeMinQuorumMet = now;
+
+            // only create reward tokens when ether is not sent to the DAO itself and
+            // related addresses. Proxy addresses should be forbidden by the curator.
+            if (p.recipient != address(this) && p.recipient != address(rewardAccount)
+                && p.recipient != address(DAOrewardAccount)
+                && p.recipient != address(extraBalance)
+                && p.recipient != address(curator)) {
+
+                rewardToken[address(this)] += p.amount;
+                totalRewardToken += p.amount;
+            }
         }
 
         closeProposal(_proposalID);
@@ -602,7 +619,7 @@ contract DAO is DAOInterface, Token, TokenCreation {
             // Have you voted for this split?
             || !p.votedYes[msg.sender]
             // Did you already vote on another proposal?
-            || blocked[msg.sender] != _proposalID) {
+            || (blocked[msg.sender] != _proposalID && blocked[msg.sender] != 0) )  {
 
             throw;
         }
@@ -683,6 +700,9 @@ contract DAO is DAOInterface, Token, TokenCreation {
         uint reward =
             (rewardToken[msg.sender] * DAOrewardAccount.accumulatedInput()) /
             totalRewardToken - DAOpaidOut[msg.sender];
+
+        reward = DAOrewardAccount.balance < reward ? DAOrewardAccount.balance : reward;
+
         if(_toMembers) {
             if (!DAOrewardAccount.payOut(dao.rewardAccount(), reward))
                 throw;
@@ -706,6 +726,9 @@ contract DAO is DAOInterface, Token, TokenCreation {
 
         uint reward =
             (balanceOf(_account) * rewardAccount.accumulatedInput()) / totalSupply - paidOut[_account];
+
+        reward = rewardAccount.balance < reward ? rewardAccount.balance : reward;
+
         if (!rewardAccount.payOut(_account, reward))
             throw;
         paidOut[_account] += reward;
@@ -818,7 +841,13 @@ contract DAO is DAOInterface, Token, TokenCreation {
 
 
     function halveMinQuorum() returns (bool _success) {
-        if (lastTimeMinQuorumMet < (now - quorumHalvingPeriod)) {
+        // this can only be called after `quorumHalvingPeriod` has passed or at anytime after
+        // fueling by the curator with a delay of at least `minProposalDebatePeriod`
+        // between the calls
+        if ((lastTimeMinQuorumMet < (now - quorumHalvingPeriod) || msg.sender == curator)
+            && lastTimeMinQuorumMet < (now - minProposalDebatePeriod)
+            && now >= closingTime
+            && proposals.length > 1) {
             lastTimeMinQuorumMet = now;
             minQuorumDivisor *= 2;
             return true;
@@ -832,18 +861,16 @@ contract DAO is DAOInterface, Token, TokenCreation {
         return daoCreator.createDAO(_newCurator, 0, 0, now + splitExecutionPeriod);
     }
 
-
     function numberOfProposals() constant returns (uint _numberOfProposals) {
         // Don't count index 0. It's used by isBlocked() and exists from start
         return proposals.length - 1;
     }
 
-    function getNewDAOAdress(uint _proposalID) constant returns (address _newDAO) {
+    function getNewDAOAddress(uint _proposalID) constant returns (address _newDAO) {
         return proposals[_proposalID].splitData[0].newDAO;
     }
 
-
-    function isBlocked(address _account) returns (bool) {
+    function isBlocked(address _account) internal returns (bool) {
         if (blocked[_account] == 0)
             return false;
         Proposal p = proposals[blocked[_account]];
@@ -853,6 +880,10 @@ contract DAO is DAOInterface, Token, TokenCreation {
         } else {
             return true;
         }
+    }
+
+    function unblockMe() returns (bool) {
+        return isBlocked(msg.sender);
     }
 }
 

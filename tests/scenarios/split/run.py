@@ -50,7 +50,7 @@ def tokens_after_split(votes, original_balance, dao_balance, reward_tokens):
 
     for vote, orig in zip(votes, original_balance):
         if vote:
-            new_dao_balance.append(orig * dao_balance / totalSupply)
+            new_dao_balance.append(orig * dao_balance / float(totalSupply))
             old_dao_balance.append(0)
             rewardToMove = float(orig) * reward_tokens / float(totalSupply)
             old_reward_tokens -= float(rewardToMove)
@@ -105,7 +105,7 @@ def run(ctx):
     # burning away user tokens in the process.
     # This should happen with the latest homestead changes:
     # https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2.mediawiki#specification
-    split_gas = 4000000
+    split_gas = 4700000
 
     votes = prepare_test_split(ctx, split_gas)
     oldBalance, newBalance, oldDAORewards, newDAORewards = tokens_after_split(

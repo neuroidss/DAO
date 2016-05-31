@@ -43,11 +43,11 @@ class TestContext():
         # keep this at end since any data loaded should override constructor
         if not os.path.isdir(datadir) or args.clean_chain:
             self.clean_blockchain()
-            self.create_accounts(args.users_num)
+            self.init_data(args.users_num)
         else:
             self.attemptLoad()
 
-    def create_accounts(self, accounts_num):
+    def init_data(self, accounts_num):
         print("Creating accounts and genesis block ...")
         with open(
                 os.path.join(self.templates_dir, 'accounts.template.js'),
@@ -62,6 +62,10 @@ class TestContext():
         self.accounts = json.loads(output)
         # creating genesis block with a generous allocation for all accounts
         create_genesis(self.accounts)
+        # now initialize geth with the new blockchain
+        subprocess.check_output([
+            self.geth, "--datadir", "./data", "init", "./genesis_block.json"
+        ])
         print("Done!")
 
     def remaining_time(self):
@@ -117,8 +121,6 @@ class TestContext():
                 "--nodiscover",
                 "--maxpeers",
                 "0",
-                "--genesis",
-                "./genesis_block.json",
                 "--datadir",
                 "./data",
                 "--verbosity",
@@ -151,27 +153,33 @@ class TestContext():
         dao_contract = edit_dao_source(
             self.contracts_dir,
             keep_limits,
+            1,  # min_proposal_debate
+            1,  # min_proposal_split
             self.args.proposal_halveminquorum,
             self.args.split_execution_period,
-            self.args.scenario == "extrabalance"
+            self.scenario_uses_extrabalance(),
+            self.args.scenario == "fuel_fail_extrabalance",
+            self.args.deploy_offer_payment_period
         )
-
-        res = self.compile_contract(dao_contract)
+        usn = os.path.join(self.contracts_dir, "USNRewardPayOutCopy.sol")
+        res = self.compile_contract(usn)
         contract = res["contracts"]["DAO"]
         DAOCreator = res["contracts"]["DAO_Creator"]
         self.creator_abi = DAOCreator["abi"]
         self.creator_bin = DAOCreator["bin"]
         self.dao_abi = contract["abi"]
         self.dao_bin = contract["bin"]
-
-        offer = os.path.join(self.contracts_dir, "SampleOffer.sol")
-        res = self.compile_contract(offer)
         self.offer_abi = res["contracts"]["SampleOffer"]["abi"]
         self.offer_bin = res["contracts"]["SampleOffer"]["bin"]
+        self.usn_abi = res["contracts"]["USNRewardPayOut"]["abi"]
+        self.usn_bin = res["contracts"]["USNRewardPayOut"]["bin"]
 
         # also delete the temporary created files
         rm_file(os.path.join(self.contracts_dir, "DAOcopy.sol"))
         rm_file(os.path.join(self.contracts_dir, "TokenCreationCopy.sol"))
+        rm_file(os.path.join(self.contracts_dir, "SampleOfferCopy.sol"))
+        rm_file(os.path.join(self.contracts_dir, "SampleOfferWithoutRewardCopy.sol"))
+        rm_file(os.path.join(self.contracts_dir, "USNRewardPayOutCopy.sol"))
 
     def create_js_file(self, substitutions, cb_before_creation=None):
         """
@@ -215,7 +223,11 @@ class TestContext():
         Check if the target scenario requires late sale, in order to
         populate the extraBalance account
         """
-        return ctx.args.scenario in ["extrabalance", "stealextrabalance"]
+        return ctx.args.scenario in [
+            "extrabalance",
+            "stealextrabalance",
+            "fuel_fail_extrabalance"
+        ]
 
     def running_scenario(self):
         """Get the currently running scenario name"""
